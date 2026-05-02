@@ -1,0 +1,9 @@
+Flask - 3.1.1
+flask-cors - 6.0.2
+Pillow - 12.1.1
+numpy - 2.2.4
+opencv-python - 4.10.0
+Python - 3.13.5
+tkinter - 8.6
+pygame - 2.6.1
+apache - 2.4.66

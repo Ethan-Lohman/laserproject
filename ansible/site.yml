@@ -1,0 +1,230 @@
+---
+- name: Configure Team Laser Raspberry Pi
+  hosts: pis
+  become: true
+
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required apt packages
+      apt:
+        name: "{{ apt_packages }}"
+        state: present
+
+    - name: Clean apt cache after installation
+      apt:
+        clean: yes
+        autoclean: yes
+        autoremove: yes
+
+    - name: Get active Wi-Fi connection name
+      shell: "nmcli -t -f NAME,DEVICE connection show --active | grep ':{{ wifi_interface }}$' | cut -d: -f1 | head -n 1"
+      register: wifi_conn_name
+      changed_when: false
+
+    - name: Show detected Wi-Fi connection
+      debug:
+        msg: "Detected Wi-Fi connection: {{ wifi_conn_name.stdout }}"
+
+    - name: Fail if no Wi-Fi connection was found
+      fail:
+        msg: "No Wi-Fi connection profile found. Connect the Pi to Wi-Fi first before running this playbook."
+      when: wifi_conn_name.stdout == ""
+
+    - name: Configure Wi-Fi connection with static IPv4
+      shell: >
+        nmcli connection modify "{{ wifi_conn_name.stdout }}"
+        ipv4.method manual
+        ipv4.addresses "{{ wifi_ip }}"
+        ipv4.gateway "{{ wifi_gateway }}"
+        ipv4.dns "{{ wifi_dns }}"
+        ipv6.method auto
+        connection.autoconnect yes
+      changed_when: true
+
+    - name: Reapply Wi-Fi settings without disconnecting
+      shell: "nmcli device reapply {{ wifi_interface }}"
+      changed_when: true
+      failed_when: false
+
+    - name: Wait for network to settle
+      pause:
+        seconds: 5
+
+    - name: Verify interface IP
+      shell: "ip -4 addr show {{ wifi_interface }} | grep inet"
+      register: interface_ip
+      changed_when: false
+      failed_when: false
+
+    - name: Show resulting interface IP
+      debug:
+        var: interface_ip.stdout
+
+    - name: Remove conflicting Pillow packages
+      apt:
+        name:
+          - python3-pil
+          - python3-pil.imagetk
+        state: absent
+        purge: yes
+
+    - name: Install required Python packages with pip
+      pip:
+        name: "{{ pip_packages }}"
+        executable: pip3
+        extra_args: --break-system-packages
+
+    - name: Ensure deploy directory exists
+      file:
+        path: "{{ deploy_root }}"
+        state: directory
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0755"
+
+    - name: Ensure image directory exists
+      file:
+        path: "{{ deploy_img_dir }}"
+        state: directory
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0755"
+
+    - name: Copy backend.py
+      copy:
+        src: ../backend.py
+        dest: "{{ deploy_root }}/backend.py"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0755"
+
+    - name: Copy boundaryDetection.py
+      copy:
+        src: ../boundaryDetection.py
+        dest: "{{ deploy_root }}/boundaryDetection.py"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0755"
+
+    - name: Copy init.py
+      copy:
+        src: ../init.py
+        dest: "{{ deploy_root }}/init.py"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Copy alert.wav
+      copy:
+        src: ../alert.wav
+        dest: "{{ deploy_root }}/alert.wav"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Copy User Manual
+      copy:
+        src: ../User Manual.pdf
+        dest: "{{ deploy_root }}/User Manual.pdf"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Copy track images
+      copy:
+        src: ../img/
+        dest: "{{ deploy_img_dir }}/"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Set ownership on deployed app folder
+      file:
+        path: "{{ deploy_root }}"
+        state: directory
+        recurse: yes
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+
+    - name: Allow pi to manage web files
+      file:
+        path: "{{ web_root }}"
+        state: directory
+        recurse: yes
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+
+    - name: Copy website index.html
+      copy:
+        src: ../index.html
+        dest: "{{ web_root }}/index.html"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Copy website style.css
+      copy:
+        src: ../style.css
+        dest: "{{ web_root }}/style.css"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Copy website icon
+      copy:
+        src: ../UindyIcon.png
+        dest: "{{ web_root }}/UindyIcon.png"
+        owner: "{{ project_user }}"
+        group: "{{ project_group }}"
+        mode: "0644"
+
+    - name: Copy apache config
+      copy:
+        src: ../apache2.conf
+        dest: "{{ apache_conf_dest }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart apache
+
+    - name: Enable apache
+      systemd:
+        name: apache2
+        enabled: yes
+        state: started
+
+    - name: Copy systemd service file
+      copy:
+        src: ../projectorAutoRun.service
+        dest: "/etc/systemd/system/{{ service_name }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart projector service
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable projector service
+      systemd:
+        name: "{{ service_name }}"
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart apache
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Restart projector service
+      systemd:
+        name: "{{ service_name }}"
+        state: restarted

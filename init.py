@@ -1,0 +1,4 @@
+ADMIN_PASSWORD = "9283"
+IMG_PASSWORD = "2025"
+DEL_IMG_PASSWORD = "3679"
+TRACK_DIR = "/home/pi/projector"

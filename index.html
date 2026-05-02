@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ideation Floor Projector</title>
+    <link rel="icon" type="image/png" href="UindyIcon.png">
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const ApiInteractor = () => {
+            const [error, setError] = React.useState(null);
+            const [selectedValue, setSelectedValue] = React.useState('option1');
+            const [sliderValue, setSliderValue] = React.useState(100);
+            const [isScaleValid, setIsScaleValid] = React.useState(true);
+            const [isProjecting, setIsProjecting] = React.useState(false);
+            const [dimensions, setDimensions] = React.useState({ width: 0, height: 0 });
+            const [showCalibrator, setShowCalibrator] = React.useState(false);
+            const [keystonePoints, setKeystonePoints] = React.useState([[0, 0], [0, 0], [0, 0], [0, 0]]);
+            const [imageDimensions, setImageDimensions] = React.useState({ width: 0, height: 0 });
+            const canvasRef = React.useRef(null);
+            const [draggingIndex, setDraggingIndex] = React.useState(null);
+            const imgRef = React.useRef(null);
+            const [options, setOptions] = React.useState([]);
+            const [uploadFile, setUploadFile] = React.useState(null);
+            const [uploadStatus, setUploadStatus] = React.useState(null);
+            const [uploadPassword, setUploadPassword] = React.useState('');
+            const [deleteOption, setDeleteOption] = React.useState('');
+            const [deleteStatus, setDeleteStatus] = React.useState(null);
+            const [deletePassword, setDeletePassword] = React.useState('');
+            const [showLiveProjection, setShowLiveProjection] = React.useState(false);
+            const liveCanvasRef = React.useRef(null);
+            const [liveDraggingIndex, setLiveDraggingIndex] = React.useState(null);
+            const liveProjectionRef = React.useRef(null);
+            const [stopwatchTime, setStopwatchTime] = React.useState('00:00:00.00');
+            const [stopwatchRunning, setStopwatchRunning] = React.useState(false);
+            const IntervalRef = React.useRef(null);
+            const [stopwatchStartTime, setStopwatchStartTime] = React.useState(null);
+            const [stopwatchElapsed, setStopwatchElapsed] = React.useState(0);
+            const stopwatchRunningRef = React.useRef(false);
+            const stopwatchStartTimeRef = React.useRef(null);
+            const stopwatchElapsedRef = React.useRef(0);
+            const [isLocked, setIsLocked] = React.useState(false);
+            const [lockPassword, setLockPassword] = React.useState('');
+            const [lockStatus, setLockStatus] = React.useState('');
+            const [adminPassword, setAdminPassword] = React.useState('');
+            const [isAdminMode, setIsAdminMode] = React.useState(false);
+            const [activeTab, setActiveTab] = React.useState('home');
+            const [projectorOn, setProjectorOn] = React.useState(false);
+            const [lastArrowKey, setLastArrowKey] = React.useState(null);
+            const [lastKeyPressTime, setLastKeyPressTime] = React.useState(null);
+            const stopwatchIntervalRef = React.useRef(null);
+            
+            const checkProjectorStatus = async () => {
+                try{
+                    const res = await axios.get('http://10.40.97.7:5000/projector/status');
+                    setProjectorOn(res.data.on);
+                }catch(err){
+                    console.error('Failed to check projector status:', err);
+                }
+            };
+
+            const formatTime = (milliseconds) => {
+                const totalSeconds = Math.floor(milliseconds / 1000);
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = totalSeconds % 60;
+                const centiseconds = Math.floor((milliseconds % 1000) / 10);
+                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
+            };
+
+            const updateStopwatchDisplay = () => {
+                if (stopwatchRunningRef.current && stopwatchStartTimeRef.current) {
+                    const now = performance.now();
+                    const currentElapsed = stopwatchElapsedRef.current + (now - stopwatchStartTimeRef.current);
+                    setStopwatchTime(formatTime(currentElapsed));
+                }
+            };
+
+            const resetStopwatch = () => {
+                setStopwatchTime('00:00:00.00');
+                setStopwatchRunning(false);
+                setStopwatchElapsed(0);
+                setStopwatchStartTime(null);
+                stopwatchRunningRef.current = false;
+                stopwatchStartTimeRef.current = null;
+                stopwatchElapsedRef.current = 0;
+                if (stopwatchIntervalRef.current) {
+                    clearInterval(stopwatchIntervalRef.current);
+                    stopwatchIntervalRef.current = null;
+                }
+            };
+
+            React.useEffect(() => {
+                setStopwatchTime(formatTime(stopwatchElapsed));
+                stopwatchElapsedRef.current = stopwatchElapsed;
+            }, [stopwatchElapsed]);
+
+            
+            const fetchDimensions = async () => {
+                try {
+                    const res = await axios.get('http://10.40.97.7:5000/getState');
+                    setDimensions({ width: res.data.width, height: res.data.height });
+                    setSliderValue(res.data.scale);  // Keep UI in sync
+                } catch (err) {
+                    setError('Failed to fetch state: ' + err.message);
+                }
+            };
+
+            const handleProjectImagePost = async () => { 
+                if (isProjecting) return;
+                setIsProjecting(true);
+                
+                try {
+                    const jsonData = {
+                        selected: selectedValue,
+                        admin_password: isAdminMode ? adminPassword : null
+                    };
+                    const res = await axios.post('http://10.40.97.7:5000/projectCertainImage', jsonData);
+                    setError(null);
+                    const stateRes = await axios.get('http://10.40.97.7:5000/getState');
+                    setSliderValue(stateRes.data.scale);
+                    setDimensions({ width: stateRes.data.width, height: stateRes.data.height });
+                } catch (err) {
+                    setError('Failed to call API: ' + err.message);
+                }
+                
+                setIsProjecting(false);
+            };
+
+            const handleStopProjection = async () => {
+                try {
+                    await axios.post('http://10.40.97.7:5000/pressEscape');
+                } catch (err) {
+                    setError('Failed to stop projection: ' + err.message);
+                }
+            };
+
+
+            const handleDropdownChange = async (event) => {
+                const newOption = event.target.value;
+                setSelectedValue(newOption);
+                try {
+                    const res = await axios.get('http://10.40.97.7:5000/getState');
+                    setSliderValue(res.data.scale);
+                    setDimensions({ width: res.data.width, height: res.data.height });
+                    setError(null);
+                } catch (err) {
+                    setError('Failed to fetch saved scale: ' + err.message); 
+                }
+            };
+
+            const handleSliderChange = async (event) => {
+                const newValue = parseInt(event.target.value, 10);
+                setSliderValue(newValue);
+                
+                if (newValue >= 10 && newValue <= 200) {
+                    setIsScaleValid(true);
+                } else {
+                    setIsScaleValid(false);
+                }
+
+                clearTimeout(window._dimTimer);
+                window._dimTimer = setTimeout(async () => {
+                    try {
+                        await axios.post('http://10.40.97.7:5000/setScale', { 
+                            scale: newValue,
+                            admin_password: isAdminMode ? adminPassword : null
+                        });
+                        await fetchDimensions();
+                    } catch (err) {
+                        setError('Sync failed: ' + err.message);
+                    }
+                }, 100);
+            };
+
+            const handleNumberInputBlur = async (event) => {
+                let newValue = parseInt(event.target.value, 10);
+                
+                if (isNaN(newValue) || newValue < 10) newValue = 10;
+                if (newValue > 200) newValue = 200;
+                
+                setSliderValue(newValue);
+                
+                try {
+                    await axios.post('http://10.40.97.7:5000/setScale', { scale: newValue });
+                    await fetchDimensions();
+                } catch (err) {
+                    setError('Sync failed: ' + err.message);
+                }
+            };
+
+            const loadKeystonePoints = async (option) => {
+                try {
+                    const res = await axios.get(`http://10.40.97.7:5000/getKeystone?option=${option}`);
+                    setKeystonePoints(res.data.points);
+                    const img = new Image();
+                    img.src = `http://10.40.97.7:5000/image/${option}`;
+                    img.onload = () => {
+                        imgRef.current = img;
+                        const w = img.width;
+                        const h = img.height;
+                        setImageDimensions({ width: w, height: h });
+
+                        const saved = res.data.points;
+                        const defaults = [[0, 0], [w, 0], [w, h], [0, h]];
+                        setKeystonePoints(
+                            saved && saved.length === 4 && saved.some(p => p[0] || p[1])
+                                ? saved
+                                : defaults
+                        );
+                    };
+                } catch (err) {
+                    setError('Failed to load keystone points: ' + err.message);
+                }
+            };
+
+            const saveKeystonePoints = async () => {
+                try {
+                    await axios.post('http://10.40.97.7:5000/setKeystone', {
+                        option: selectedValue, 
+                        points: keystonePoints,
+                        admin_password: isAdminMode ? adminPassword : null
+                    });
+                    setError(null);
+                    alert('Keystone points saved successfully!');
+                } catch (err){
+                    setError('Failed to save keystone points: ' + err.message);
+                }
+            };
+
+            const resetKeystonePoints = () => {
+                setKeystonePoints([
+                    [0, 0],
+                    [imageDimensions.width, 0],
+                    [imageDimensions.width, imageDimensions.height],
+                    [0, imageDimensions.height]
+                ]);
+            };
+
+            const drawCanvas = (img) => {
+                const canvas = canvasRef.current;
+                if(!canvas || !imgRef.current || imageDimensions.width === 0) return;
+
+                const ctx = canvas.getContext('2d');
+                const displayWidth = 400;
+                const displayHeight = (displayWidth / img.width) * img.height;
+
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                keystonePoints.forEach(([x, y]) => {
+                    const px = (x / imageDimensions.width) * canvas.width;
+                    const py = (y / imageDimensions.height) * canvas.height;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 10, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'red';
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                });
+            };
+
+            const handleCanvasMouseDown = (e) => {
+                if (!canvasRef.current) return;
+                const rect = canvasRef.current.getBoundingClientRect();
+                const mouseX = (e.clientX - rect.left) * (imageDimensions.width / rect.width);
+                const mouseY = (e.clientY - rect.top) * (imageDimensions.height / rect.height);
+                keystonePoints.forEach((point, index) => {
+                    if(Math.hypot(point[0] - mouseX, point[1] - mouseY) < 20){
+                        setDraggingIndex(index);
+                    }
+                });
+            };
+
+            const handleCanvasMouseMove = (e) => {
+                if (draggingIndex === null) return;
+                if (!canvasRef.current) return;
+                const rect = canvasRef.current.getBoundingClientRect();
+                const mouseX = Math.max(0, Math.min(imageDimensions.width, (e.clientX - rect.left) * (imageDimensions.width / rect.width)));
+                const mouseY = Math.max(0, Math.min(imageDimensions.height, (e.clientY - rect.top) * (imageDimensions.height / rect.height)));
+                const newPoints = [...keystonePoints];
+                newPoints[draggingIndex] = [mouseX, mouseY];
+                setKeystonePoints(newPoints);
+                if (imgRef.current) drawCanvas(imgRef.current);
+            };
+
+            const handleCanvasMouseUp = () => {
+                setDraggingIndex(null);
+            };
+
+            const drawLiveProjection = () => {
+                if (!liveCanvasRef.current || !imgRef.current || imageDimensions.width === 0) return;
+
+                const canvas = liveCanvasRef.current;
+                const ctx = canvas.getContext('2d');
+                
+                const screenWidth = window.innerWidth;
+                const screenHeight = window.innerHeight;
+                
+                canvas.width = screenWidth;
+                canvas.height = screenHeight;
+                
+                ctx.clearRect(0, 0, screenWidth, screenHeight);
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, screenWidth, screenHeight);
+                
+                const img = imgRef.current;
+                const imgW = imageDimensions.width;
+                const imgH = imageDimensions.height;
+                
+                const minDimension = Math.min(screenWidth, screenHeight);
+                const maxImgDimension = Math.max(imgW, imgH);
+                const baseScale = (minDimension * 0.8) / maxImgDimension;
+                const scale = baseScale * (sliderValue / 100);
+                
+                const screenPoints = keystonePoints.map(([x, y]) => {
+                    const sx = (screenWidth / 2) + ((x - imgW / 2) * scale);
+                    const sy = (screenHeight / 2) + ((y - imgH / 2) * scale);
+                    return [sx, sy];
+                });
+                
+                try {
+                    const [tl, tr, br, bl] = screenPoints;
+                    
+                    const drawTriangle = (
+                        ctx, img,
+                        x0, y0, x1, y1, x2, y2,
+                        u0, v0, u1, v1, u2, v2
+                    ) => {
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.moveTo(x0, y0);
+                        ctx.lineTo(x1, y1);
+                        ctx.lineTo(x2, y2);
+                        ctx.closePath();
+                        ctx.clip();
+                        
+                        const x1_x0 = x1 - x0, y1_y0 = y1 - y0;
+                        const x2_x0 = x2 - x0, y2_y0 = y2 - y0;
+                        const u1_u0 = u1 - u0, v1_v0 = v1 - v0;
+                        const u2_u0 = u2 - u0, v2_v0 = v2 - v0;
+                        
+                        const det = u1_u0 * v2_v0 - u2_u0 * v1_v0;
+                        if (Math.abs(det) < 0.0001) {
+                            ctx.restore();
+                            return;
+                        }
+                        
+                        const a = (x1_x0 * v2_v0 - x2_x0 * v1_v0) / det;
+                        const b = (x2_x0 * u1_u0 - x1_x0 * u2_u0) / det;
+                        const c = (y1_y0 * v2_v0 - y2_y0 * v1_v0) / det;
+                        const d = (y2_y0 * u1_u0 - y1_y0 * u2_u0) / det;
+                        const e = x0 - (a * u0 + b * v0);
+                        const f = y0 - (c * u0 + d * v0);
+                        
+                        ctx.transform(a, c, b, d, e, f);
+                        ctx.drawImage(img, 0, 0);
+                        ctx.restore();
+                    };
+                    
+                    drawTriangle(
+                        ctx, img,
+                        tl[0], tl[1], tr[0], tr[1], bl[0], bl[1],
+                        0, 0, imgW, 0, 0, imgH
+                    );
+                    
+                    drawTriangle(
+                        ctx, img,
+                        tr[0], tr[1], br[0], br[1], bl[0], bl[1],
+                        imgW, 0, imgW, imgH, 0, imgH
+                    );
+                    
+                } catch (e) {
+                    console.error('Failed to draw image:', e);
+                }
+                
+                const markerColors = ['red', 'lime', 'blue', 'yellow'];
+                const markerLabels = ['Top-Left', 'Top-Right', 'Bottom-Right', 'Bottom-Left'];
+                
+                screenPoints.forEach(([screenX, screenY], index) => {
+                    const isSelected = liveDraggingIndex === index;
+                    const radius = isSelected ? 20 : 15;
+                    
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, radius, 0, 2 * Math.PI);
+                    ctx.fillStyle = markerColors[index];
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = isSelected ? 5 : 3;
+                    ctx.stroke();
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = isSelected ? 'bold 16px Arial' : 'bold 12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(markerLabels[index], screenX, screenY - (isSelected ? 30 : 25));
+                });
+                
+                ctx.strokeStyle = 'cyan';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                screenPoints.forEach(([x, y], index) => {
+                    if (index === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.closePath();
+                ctx.stroke();
+                ctx.setLineDash([]);
+            };
+
+            const handleLiveCanvasMouseDown = (e) => {
+                if (!liveCanvasRef.current) return;
+                
+                const rect = liveCanvasRef.current.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const screenWidth = window.innerWidth;
+                const screenHeight = window.innerHeight;
+                const imgW = imageDimensions.width;
+                const imgH = imageDimensions.height;
+                
+                const minDimension = Math.min(screenWidth, screenHeight);
+                const maxImgDimension = Math.max(imgW, imgH);
+                const baseScale = (minDimension * 0.8) / maxImgDimension;
+                const scale = baseScale * (sliderValue / 100);
+                
+                keystonePoints.forEach((point, index) => {
+                    const [x, y] = point;
+                    const screenX = (screenWidth / 2) + ((x - imgW / 2) * scale);
+                    const screenY = (screenHeight / 2) + ((y - imgH / 2) * scale);
+                    const distance = Math.hypot(screenX - mouseX, screenY - mouseY);
+                    if (distance < 30) {
+                        setLiveDraggingIndex(index);
+                    }
+                });
+            };
+
+            const handleLiveCanvasMouseMove = (e) => {
+                if (liveDraggingIndex === null || !liveCanvasRef.current) return;
+                
+                const rect = liveCanvasRef.current.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const screenWidth = window.innerWidth;
+                const screenHeight = window.innerHeight;
+                const imgW = imageDimensions.width;
+                const imgH = imageDimensions.height;
+                
+                const minDimension = Math.min(screenWidth, screenHeight);
+                const maxImgDimension = Math.max(imgW, imgH);
+                const baseScale = (minDimension * 0.8) / maxImgDimension;
+                const scale = baseScale * (sliderValue / 100);
+                
+                const imgX = ((mouseX - screenWidth / 2) / scale) + (imgW / 2);
+                const imgY = ((mouseY - screenHeight / 2) / scale) + (imgH / 2);
+                
+                const clampedX = Math.max(0, Math.min(imgW, imgX));
+                const clampedY = Math.max(0, Math.min(imgH, imgY));
+                
+                const newPoints = [...keystonePoints];
+                newPoints[liveDraggingIndex] = [clampedX, clampedY];
+                setKeystonePoints(newPoints);
+                
+                clearTimeout(window._keystoneTimer);
+                window._keystoneTimer = setTimeout(async () => {
+                    try {
+                        await axios.post('http://10.40.97.7:5000/setKeystone', {
+                            option: selectedValue, 
+                            points: newPoints
+                        });
+                        await axios.post('http://10.40.97.7:5000/projectCertainImage', {
+                            selected: selectedValue
+                        });
+                    } catch (err) {
+                        console.error('Failed to update backend keystone:', err);
+                    }
+                }, 100);
+            };
+
+            const handleLiveCanvasMouseUp = () => {
+                setLiveDraggingIndex(null);
+            };
+
+            const toggleLiveProjection = async () => {
+                const newState = !showLiveProjection;
+                setShowLiveProjection(newState);
+                
+                if (newState) {
+                    try {
+                        const jsonData = {selected: selectedValue};
+                        await axios.post('http://10.40.97.7:5000/projectCertainImage', jsonData);
+                    } catch (err) {
+                        console.error('Failed to start projection:', err);
+                        setError('Failed to start projection: ' + err.message);
+                    }
+                }
+            };
+
+            const loadOptions = async () => {
+                try {
+                    const res = await axios.get('http://10.40.97.7:5000/options');
+                    const data = res.data;
+                    setOptions(data);
+
+                    if (Array.isArray(data)) {
+                        if (data.length > 0 && !data.some(opt => opt.value === selectedValue)) {
+                            setSelectedValue(data[0].value);
+                        }
+                    } else {
+                        console.error('Expected array from /options, got:', data);
+                        setOptions([]);
+                    }
+                } catch (err) {
+                    setError('Failed to load options: ' + err.message);
+                    setOptions([]);
+                }
+            };
+
+            const handleFileChange = (e) => {
+                setUploadFile(e.target.files[0] || null);
+                setUploadStatus('');
+            };
+
+            const handleUpload = async () => {
+                if(!uploadFile || !uploadPassword){
+                    setUploadStatus('Error: Correct password and file are required')
+                    return;
+                } 
+                const formData = new FormData();
+                formData.append('file', uploadFile);
+                formData.append('password', uploadPassword);
+                try {
+                    setUploadStatus('Uploading...');
+                    await axios.post('http://10.40.97.7:5000/upload', formData, {
+                        headers: {'Content-Type': 'multipart/form-data'}
+                    });
+                    setUploadStatus('Upload successful!');
+                    setUploadFile(null);
+                    setUploadPassword('');
+                    await loadOptions();
+                    setUploadStatus('');
+                } catch (err) {
+                    setUploadStatus('Error:' + (err.response?.data?.message || err.message));
+                }
+            };
+
+            const handleDelete = async () => {
+                if(!deleteOption || !deletePassword){
+                    setDeleteStatus('Error: Correct password and option are required');
+                    return;
+                }
+                const formData = new FormData();
+                formData.append('option', deleteOption);
+                formData.append('password', deletePassword);
+                try {
+                    setDeleteStatus('Deleting...');
+                    await axios.post('http://10.40.97.7:5000/delete', formData, {
+                        headers: {'Content-Type': 'multipart/form-data'}
+                    });
+                    setDeleteStatus('Delete successful!');
+                    
+                    if (deleteOption === selectedValue) {
+                        await loadOptions();
+                    } else {
+                        await loadOptions();
+                    }
+                    
+                    setDeleteOption('');
+                    setDeletePassword('');
+                    setDeleteStatus('');
+                } catch (err) {
+                    setDeleteStatus('Error:' + (err.response?.data?.error || err.message));
+                }
+            };
+
+            const checkLockStatus = async () => {
+                try {
+                    const res = await axios.get('http://10.40.97.7:5000/lock/status');
+                    setIsLocked(res.data.locked);
+                } catch (err) {
+                    console.error('Failed to check lock status:', err);
+                }
+            };
+
+            const handleLock = async () => {
+                if (!lockPassword) {
+                    setLockStatus('Error: Password required');
+                    return;
+                }
+                try {
+                    const res = await axios.post('http://10.40.97.7:5000/lock', { password: lockPassword });
+                    setLockStatus(res.data.message);
+                    setIsLocked(true);
+                    setLockPassword('');
+                } catch (err) {
+                    setLockStatus('Error: ' + (err.response?.data?.error || err.message));
+                }
+            };
+
+            const handleUnlock = async () => {
+                if (!lockPassword) {
+                    setLockStatus('Error: Password required');
+                    return;
+                }
+                try {
+                    const res = await axios.post('http://10.40.97.7:5000/unlock', { password: lockPassword });
+                    setLockStatus(res.data.message);
+                    setIsLocked(false);
+                    setLockPassword('');
+                } catch (err) {
+                    setLockStatus('Error: ' + (err.response?.data?.error || err.message));
+                }
+            };
+
+            React.useEffect(() => {
+                checkProjectorStatus();
+                const interval = setInterval(checkProjectorStatus, 10000);
+                return () => clearInterval(interval);
+            }, []);
+
+            React.useEffect(() => {
+                checkLockStatus();
+                const interval = setInterval(checkLockStatus, 5000);
+                return () => clearInterval(interval);
+            }, []);
+
+            React.useEffect(() => {
+                fetchDimensions();
+            }, []);
+
+            React.useEffect(() => {
+                if (showCalibrator){
+                    loadKeystonePoints(selectedValue);
+                }
+            }, [showCalibrator, selectedValue]);
+
+            React.useEffect(() => {
+                if(showCalibrator && imgRef.current){
+                   drawCanvas(imgRef.current);
+                }
+            }, [keystonePoints, imageDimensions, showCalibrator]);
+
+            React.useEffect(() => {
+                loadOptions();
+            }, []);
+
+            React.useEffect(() => {
+                if (showLiveProjection) {
+                    drawLiveProjection();
+                }
+            }, [showLiveProjection, keystonePoints, sliderValue, imageDimensions]);
+
+            // Arrow key controls for projector clicker with sequence detection
+            React.useEffect(() => {
+                const handleKeyDown = (e) => {
+
+                    // Arrow key controls for projector clicker with sequence detection
+                    if (e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        const now = performance.now();
+                        
+                        if (lastArrowKey === 'ArrowLeft' && lastKeyPressTime && (now - lastKeyPressTime) < 500) {
+                            resetStopwatch();
+                            setLastArrowKey(null);
+                            setLastKeyPressTime(null);
+                        } else {
+                            if (!stopwatchRunning) {
+                                const startTime = performance.now();
+                                setStopwatchRunning(true);
+                                setStopwatchStartTime(startTime);
+                                stopwatchRunningRef.current = true;
+                                stopwatchStartTimeRef.current = startTime;
+                                
+                                if (stopwatchIntervalRef.current) clearInterval(stopwatchIntervalRef.current);
+                                stopwatchIntervalRef.current = setInterval(updateStopwatchDisplay, 10);
+                            }
+                
+                            setLastArrowKey('ArrowRight');
+                            setLastKeyPressTime(now);
+                        }
+                
+                    } else if (e.key === 'ArrowLeft') {
+                        e.preventDefault();
+                        const now = performance.now();
+                        setLastArrowKey('ArrowLeft');
+                        setLastKeyPressTime(now);
+                
+                        if (stopwatchRunning) {
+                            setStopwatchRunning(false);
+                            
+                            if (stopwatchIntervalRef.current)
+                                clearInterval(stopwatchIntervalRef.current);
+                
+                            if (stopwatchStartTime) {
+                                const elapsed = performance.now();
+                                const finalElapsed = stopwatchElapsed + (elapsed - stopwatchStartTime);
+                                
+                                setStopwatchElapsed(finalElapsed);
+                                setStopwatchTime(formatTime(finalElapsed));
+                                setStopwatchStartTime(null);
+                
+                                stopwatchRunningRef.current = false;
+                                stopwatchStartTimeRef.current = null;
+                            }
+                        }
+                
+                    } else if (e.code === 'Space') {  
+                        e.preventDefault();
+                
+                        if (stopwatchRunning) {
+                            // Pause
+                            setStopwatchRunning(false);
+                
+                            if (stopwatchIntervalRef.current)
+                                clearInterval(stopwatchIntervalRef.current);
+                
+                            if (stopwatchStartTime) {
+                                const elapsed = performance.now();
+                                const finalElapsed = stopwatchElapsed + (elapsed - stopwatchStartTime);
+                
+                                setStopwatchElapsed(finalElapsed);
+                                setStopwatchTime(formatTime(finalElapsed));
+                                setStopwatchStartTime(null);
+                
+                                stopwatchRunningRef.current = false;
+                                stopwatchStartTimeRef.current = null;
+                            }
+                
+                        } else if (stopwatchElapsed > 0) {
+                            // Resume
+                            const startTime = performance.now();
+                
+                            setStopwatchRunning(true);
+                            setStopwatchStartTime(startTime);
+                
+                            stopwatchRunningRef.current = true;
+                            stopwatchStartTimeRef.current = startTime;
+                
+                            if (stopwatchIntervalRef.current)
+                                clearInterval(stopwatchIntervalRef.current);
+                
+                            stopwatchIntervalRef.current = setInterval(updateStopwatchDisplay, 10);
+                        }
+                    }
+                };
+
+                
+                const handleResize = () => {
+                    if (showLiveProjection) {
+                        drawLiveProjection();
+                    }
+                };
+                
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('resize', handleResize);
+                return () => {
+                    window.removeEventListener('keydown', handleKeyDown);
+                    window.removeEventListener('resize', handleResize);
+                };
+            }, [showLiveProjection, keystonePoints, sliderValue, stopwatchRunning, stopwatchStartTime, stopwatchElapsed, lastArrowKey, lastKeyPressTime]);
+
+            return (
+                <div>
+                    {/* Tab Navigation */}
+                    <div className="tab-nav">
+                        <button 
+                            className={`tab-button ${activeTab === 'home' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('home')}
+                        >
+                            Home
+                        </button>
+                        <button 
+                            className={`tab-button ${activeTab === 'settings' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('settings')}
+                        >
+                            Settings
+                        </button>
+                    </div>
+
+                    {/* Home Tab */}
+                    {activeTab === 'home' && (
+                        <div className="tab-content">
+                            <h1>Ideation Floor Projector</h1>
+                            
+                            {isLocked && (
+                                <div className="status-badge status-locked">
+                                    System Locked
+                                </div>
+                            )}
+
+                            <label>Select Image</label>
+                            <select value={selectedValue} onChange={handleDropdownChange}>
+                                {options.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <label>Image Scale: {sliderValue}%</label>
+                            <input 
+                                type="range" 
+                                min="10" 
+                                max="200" 
+                                value={sliderValue} 
+                                onChange={handleSliderChange}
+                            />
+                            <input 
+                                type="number" 
+                                min="10" 
+                                max="200" 
+                                value={sliderValue} 
+                                onChange={(e) => setSliderValue(parseInt(e.target.value, 10) || 100)}
+                                onBlur={handleNumberInputBlur}
+                                placeholder="Enter scale"
+                                style={{width: '100%', padding: '10px', fontSize: '15px', border: '1px solid #ddd', borderRadius: '6px', marginTop: '10px'}}
+                            />
+                            <p style={{fontSize: '14px', color: '#666', margin: '8px 0'}}>
+                                Projected size: <strong>{dimensions.width} × {dimensions.height} px</strong>
+                            </p>
+
+                            <button 
+                                onClick={handleProjectImagePost} 
+                                disabled={!isScaleValid || isProjecting || (isLocked && !isAdminMode)}
+                            >
+                                {isProjecting ? 'Projecting...' : 'Project Image'}
+                            </button>
+                            <button 
+                                onClick={handleStopProjection} 
+                            >
+                                {'Stop Projecting Track'}
+                            </button>
+
+                            <h2 style={{fontSize: '18px', marginTop: '24px', marginBottom: '12px'}}>Stopwatch</h2>
+                            <div className="stopwatch-display">{stopwatchTime}</div>
+                            <div className="button-group" style={{gridTemplateColumns: '1fr 1fr 1fr'}}>
+                                <button 
+                                    onClick={() => {
+                                        if (!stopwatchRunning) {
+                                            const startTime = performance.now();
+                                            setStopwatchRunning(true);
+                                            setStopwatchStartTime(startTime);
+                                            stopwatchRunningRef.current = true;
+                                            stopwatchStartTimeRef.current = startTime;
+                                            if (stopwatchIntervalRef.current) clearInterval(stopwatchIntervalRef.current);
+                                            stopwatchIntervalRef.current = setInterval(updateStopwatchDisplay, 10);
+                                        }
+                                    }}
+                                    disabled={stopwatchRunning}
+                                    style={{background: '#4CAF50'}}
+                                >
+                                    Start
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if (stopwatchRunning) {
+                                            setStopwatchRunning(false);
+                                            if (stopwatchIntervalRef.current) clearInterval(stopwatchIntervalRef.current);
+                                            if (stopwatchStartTime) {
+                                                const now = performance.now();
+                                                const finalElapsed = stopwatchElapsed + (now - stopwatchStartTime);
+                                                setStopwatchElapsed(finalElapsed);
+                                                setStopwatchTime(formatTime(finalElapsed));
+                                                setStopwatchStartTime(null);
+                                                stopwatchRunningRef.current = false;
+                                                stopwatchStartTimeRef.current = null;
+                                            }
+                                        }
+                                    }}
+                                    disabled={!stopwatchRunning}
+                                    style={{background: '#FF9800'}}
+                                >
+                                    Stop
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if (stopwatchIntervalRef.current) clearInterval(stopwatchIntervalRef.current);
+                                        setStopwatchRunning(false);
+                                        setStopwatchStartTime(null);
+                                        setStopwatchElapsed(0);
+                                        setStopwatchTime('00:00:00.00');
+                                        stopwatchRunningRef.current = false;
+                                        stopwatchStartTimeRef.current = null;
+                                        stopwatchElapsedRef.current = 0;
+                                    }}
+                                    style={{background: '#f44336'}}
+                                >
+                                    Reset
+                                </button>
+                            </div>
+
+                            <h2 style={{fontSize: '18px', marginTop: '24px', marginBottom: '12px'}}>Projector Control</h2>
+                            {projectorOn && (
+                                <div className="status-badge" style={{background: '#e8f5e9', color: '#2e7d32'}}>
+                                    ✓ Projector ON
+                                </div>
+                            )}
+                            {!projectorOn && (
+                                <div className="status-badge" style={{background: '#ffebee', color: '#c62828'}}>
+                                    ✗ Projector OFF
+                                </div>
+                            )}
+                            <div className="button-group">
+                                <button 
+                                    onClick={async () => {
+                                        try {
+                                            await axios.post('http://10.40.97.7:5000/projector/on', {
+                                                admin_password: isAdminMode ? adminPassword : null
+                                            });
+                                            alert('Projector turned ON');
+                                        } catch (err) {
+                                            alert('Error: ' + (err.response?.data?.error || err.message));
+                                        }
+                                    }}
+                                    style={{background: '#4CAF50'}}
+                                    disabled={isLocked && !isAdminMode}
+                                >
+                                    Projector ON
+                                </button>
+                                <button 
+                                    onClick={async () => {
+                                        try {
+                                            await axios.post('http://10.40.97.7:5000/projector/off', {
+                                                admin_password: isAdminMode ? adminPassword : null
+                                            });
+                                            alert('Projector turned OFF');
+                                        } catch (err) {
+                                            alert('Error: ' + (err.response?.data?.error || err.message));
+                                        }
+                                    }}
+                                    style={{background: '#f44336'}}
+                                    disabled={isLocked && !isAdminMode}
+                                >
+                                    Projector OFF
+                                </button>
+                            </div>
+
+                            <h2 style={{fontSize: '18px', marginTop: '24px', marginBottom: '12px'}}>Boundary Detection Control</h2>
+                            <div className="button-group">
+                                <button 
+                                    onClick={async () => {
+                                        try {
+                                            await axios.post('http://10.40.97.7:5000/startBoundaryDetection', {});
+                                            alert('Boundary Detection Started');
+                                        } catch (err) {
+                                            alert('Error: ' + (err.response?.data?.error || err.message));
+                                        }
+                                    }}
+                                >
+                                    Boundary Detection ON
+                                </button>
+                                <button 
+                                    onClick={async () => {
+                                        try {
+                                            await axios.post('http://10.40.97.7:5000/stopBoundaryDetection', {});
+                                            alert('Boundary Detection Stopped');
+                                        } catch (err) {
+                                            alert('Error: ' + (err.response?.data?.error || err.message));
+                                        }
+                                    }}
+                                >
+                                    Boundary Detection OFF
+                                </button>
+                            </div>
+
+                            {error && <p style={{color: 'red', marginTop: '12px'}}>{error}</p>}
+                        </div>
+                    )}
+
+                    {/* Settings Tab */}
+                    {activeTab === 'settings' && (
+                        <div className="tab-content">
+                            <h1>Settings</h1>
+
+                            <div className="section">
+                                <h2 style={{fontSize: '18px', marginTop: '0', marginBottom: '12px'}}>System Lock</h2>
+                                <div className={`status-badge ${isLocked ? 'status-locked' : 'status-unlocked'}`}>
+                                    {isLocked ? 'System Locked' : 'System Unlocked'}
+                                </div>
+                                
+                                <label>Admin Password</label>
+                                <input 
+                                    type="password" 
+                                    value={lockPassword} 
+                                    onChange={(e) => {
+                                        setLockPassword(e.target.value);
+                                        if (e.target.value) {
+                                            setAdminPassword(e.target.value);
+                                            setIsAdminMode(true);
+                                        } else {
+                                            setAdminPassword('');
+                                            setIsAdminMode(false);
+                                        }
+                                    }} 
+                                    placeholder="Enter admin password"
+                                />
+                                {!isLocked ? (
+                                    <button onClick={handleLock} disabled={!lockPassword} style={{background: '#f44336'}}>
+                                        Lock System
+                                    </button>
+                                ) : (
+                                    <button onClick={handleUnlock} disabled={!lockPassword} style={{background: '#4CAF50'}}>
+                                        Unlock System
+                                    </button>
+                                )}
+                                {lockStatus && <p style={{color: lockStatus.startsWith('Error') ? 'red' : 'green', marginTop: '10px'}}>{lockStatus}</p>}
+                            </div>
+
+                            <div className="section">
+                                <h2 style={{fontSize: '18px', marginTop: '0', marginBottom: '12px'}}>Upload Image</h2>
+                                <label>Select Image File</label>
+                                <input type="file" accept="image/*" onChange={handleFileChange} />
+                                
+                                <label>Upload Password</label>
+                                <input 
+                                    type="password" 
+                                    value={uploadPassword} 
+                                    onChange={(e) => setUploadPassword(e.target.value)} 
+                                    placeholder="Enter upload password"
+                                />
+                                <button onClick={handleUpload} disabled={!uploadFile || !uploadPassword}>
+                                    Upload New Image
+                                </button>
+                                {uploadStatus && <p style={{color: uploadStatus.startsWith('Error') ? 'red' : 'green'}}>{uploadStatus}</p>}
+                            </div>
+
+                            <div className="section">
+                                <h2 style={{fontSize: '18px', marginTop: '0', marginBottom: '12px'}}>Delete Image</h2>
+                                <label>Select Image to Delete</label>
+                                <select value={deleteOption} onChange={(e) => setDeleteOption(e.target.value)}>
+                                    <option value="">Select an image...</option>
+                                    {options.map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                                
+                                <label>Delete Password</label>
+                                <input 
+                                    type="password" 
+                                    value={deletePassword} 
+                                    onChange={(e) => setDeletePassword(e.target.value)} 
+                                    placeholder="Enter delete password"
+                                />
+                                <button onClick={handleDelete} disabled={!deleteOption || !deletePassword} style={{background: '#f44336'}}>
+                                    Delete Image
+                                </button>
+                                {deleteStatus && <p style={{color: deleteStatus.startsWith('Error') ? 'red' : 'green'}}>{deleteStatus}</p>}
+                            </div>
+
+                            <div className="section">
+                                <h2 style={{fontSize: '18px', marginTop: '0', marginBottom: '12px'}}>System</h2>
+                                <button 
+                                    onClick={async () => {
+                                        if (!window.confirm('Are you sure you want to reboot the Raspberry Pi?')) return;
+                                        try {
+                                            await axios.post('http://10.40.97.7:5000/reboot', {
+                                                admin_password: isAdminMode ? adminPassword : null
+                                            });
+                                            alert('Reboot command sent.');
+                                        } catch (err) {
+                                            alert('Error: ' + (err.response?.data?.error || err.message));
+                                        }
+                                    }}
+                                    style={{background: '#9C27B0'}}
+                                    disabled={!isAdminMode}
+                                >
+                                    Reboot Raspberry Pi
+                                </button>
+                                {!isAdminMode && <p style={{fontSize: '13px', color: '#999', marginTop: '8px'}}>Enter admin password above to enable.</p>}
+                            </div>
+
+                            <div className="section">
+                                <h2 style={{fontSize: '18px', marginTop: '0', marginBottom: '12px'}}>User Manual</h2>
+                                <a href="User Manual.pdf" download="User Manual.pdf" style={{textDecoration: 'none'}}>
+                                    <button style={{background: '#0066cc'}}>
+                                        Download User Manual
+                                    </button>
+                                </a>
+                            </div>
+
+                            <div className="section">
+                                <h2 style={{fontSize: '18px', marginTop: '0', marginBottom: '12px'}}>Keystone Calibrator</h2>
+                                <button onClick={() => setShowCalibrator(!showCalibrator)} style={{background: '#2196F3'}}>
+                                    {showCalibrator ? 'Hide' : 'Show'} Keystone Calibrator
+                                </button>
+
+                                {showCalibrator && (
+                                    <div style={{marginTop: '20px'}}>
+                                        <p style={{fontSize: '14px', color: '#666'}}>Drag the red points to adjust keystone correction</p>
+                                        <canvas 
+                                            ref={canvasRef}
+                                            onMouseDown={handleCanvasMouseDown}
+                                            onMouseMove={handleCanvasMouseMove}
+                                            onMouseUp={handleCanvasMouseUp}
+                                            onMouseLeave={handleCanvasMouseUp}
+                                            style={{border: '1px solid #ccc', cursor: 'pointer', maxWidth: '100%'}}
+                                        />
+                                        <div style={{marginTop: '10px', display: 'flex', gap: '10px'}}>
+                                            <button onClick={saveKeystonePoints} style={{background: '#4CAF50', flex: 1}}>
+                                                Save Keystone
+                                            </button>
+                                            <button onClick={resetKeystonePoints} style={{background: '#FF9800', flex: 1}}>
+                                                Reset
+                                            </button>
+                                            <button onClick={toggleLiveProjection} style={{background: '#9C27B0', flex: 1}}>
+                                                {showLiveProjection ? 'Close' : 'Enable'} Live
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Live Projection Overlay */}
+                    {showLiveProjection && (
+                        <div 
+                            ref={liveProjectionRef}
+                            style={{
+                                position: 'fixed',
+                                top: 0,
+                                left: 0,
+                                width: '100vw',
+                                height: '100vh',
+                                backgroundColor: 'black',
+                                zIndex: 9999,
+                                cursor: 'crosshair'
+                            }}
+                        >
+                            <canvas 
+                                ref={liveCanvasRef}
+                                onMouseDown={handleLiveCanvasMouseDown}
+                                onMouseMove={handleLiveCanvasMouseMove}
+                                onMouseUp={handleLiveCanvasMouseUp}
+                                onMouseLeave={handleLiveCanvasMouseUp}
+                                style={{width: '100%', height: '100%', display: 'block'}}
+                            />
+                            <div style={{
+                                position: 'absolute',
+                                top: '10px',
+                                left: '10px',
+                                color: 'yellow',
+                                fontSize: '18px',
+                                fontWeight: 'bold',
+                                backgroundColor: 'rgba(0,0,0,0.7)',
+                                padding: '10px 20px',
+                                borderRadius: '5px',
+                                pointerEvents: 'none'
+                            }}>
+                                Drag corner points to adjust keystone - Press ESC or SPACE to close
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )};
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ApiInteractor />);
+    </script>
+</body>
+</html>

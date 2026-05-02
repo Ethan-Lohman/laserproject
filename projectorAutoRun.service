@@ -1,0 +1,20 @@
+[Unit]
+Description=Projector Backend Autostart on Boot
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=pi                  
+Group=pi                 
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+WorkingDirectory=/home/pi/projector
+ExecStart=/usr/bin/python3 /home/pi/projector/backend.py
+Restart=always              # Restarts if it crashes/exits
+RestartSec=10               # Wait 10s before restart
+StandardOutput=append:/home/pi/projector_cron.log
+StandardError=append:/home/pi/projector_cron.log
+
+[Install]
+WantedBy=graphical.target

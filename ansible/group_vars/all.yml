@@ -1,0 +1,28 @@
+project_user: pi
+project_group: pi
+
+repo_root_on_pi: /home/pi/2025-26-TeamLaser
+deploy_root: /home/pi/projector
+deploy_img_dir: /home/pi/projector/img
+
+web_root: /var/www/html
+apache_conf_dest: /etc/apache2/apache2.conf
+
+service_name: projectorAutoRun.service
+
+apt_packages:
+  - apache2
+  - python3-pip
+  - python3-full
+  - python3-opencv
+  - network-manager
+
+pip_packages:
+  - pillow
+  - flask
+  - flask-cors
+
+wifi_interface: wlan0
+wifi_ip: 10.40.97.7/21 #change to match ip wanted, team chosen ip was 10.40.97.7
+wifi_gateway: 10.40.96.1
+wifi_dns: "192.168.73.8 192.168.73.9"
